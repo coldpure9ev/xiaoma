@@ -57,7 +57,7 @@ async def download_mp3(music_info):
             "Host": "music.163.com",
             "Referer": "http://music.163.com",
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_1_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.87 Safari/537.36",
-            "Cookie": "MUSIC_U=6aaff42e44dbab42ef535264fac1515d3e77a0e92573ef730bf880b29f9097d50931c3a9fbfe3df2"
+            "Cookie": "MUSIC_U=xx6aaff42e44dbab42ef535264fac1515d3e77a0e92573ef730bf880b29f9097d50931c3a9fbfe3df2"
         }
         data = {
             "ids": [song_id],
