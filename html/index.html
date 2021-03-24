@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="./style/normalize.css">
+    <link rel="stylesheet" href="./style/index.css">
+    <link rel="icon" href="./img/favicon.ico" type="image/x-icon">
+    <link rel="shortcut icon" href="./img/favicon.ico" type="image/x-icon">
+    <title>Q9音乐</title>
+</head>
+
+<body>
+    <div id="app">
+        <div class="download-wrap">
+            <div class="msg-box">{{message}}</div>
+            <div class="download-list" v-for="item,index in download_queue" :key="index">
+                {{item.title}}-{{item.singer}}
+            </div>
+        </div>
+        <div class="main">
+            <div class="top-action">
+                <div :class="['top-cell',source_selected.id==item.id?'top-selected':'']" v-for="item in music_source"
+                    :key="item.id" @click="handleMusicSource(item)">{{item.value}}</div>
+            </div>
+            <div class="header-bar">
+                <div class="search-box">
+                    <input :value="filter_value" type="text" class="search-input" placeholder="搜索音乐"
+                        @compositionstart="filterStart" @compositionend="filterEnd" @input="handleFilter($event)"
+                        v-if="source_selected.id==1">
+                    <input v-model="search_value" type="text" class="search-input" placeholder="搜索音乐"
+                        @keyup.enter.native="handleSearch" v-else>
+                </div>
+            </div>
+            <div class="music-wrap">
+                <div class="title-row">
+                    <div class="title-cell"></div>
+                    <div class="title-cell">音乐标题</div>
+                    <div class="title-cell">歌手</div>
+                    <div class="title-cell">{{source_selected.id==1?'时长':''}}</div>
+                </div>
+                <div class="music-list local_list" v-if="source_selected.id==1">
+                    <div :class="['music-item',item.index==current_music.index?'music-playing':'']"
+                        v-for="item in music_local_list" :key="item.index" @dblclick="playMusic(item)">
+                        <div class="item-cell index">
+                            <span class="playing-icon"
+                                v-show="item.index==current_music.index"></span>{{indexFilter(item.index)}}
+                        </div>
+                        <div class="item-cell title">{{item.title}}</div>
+                        <div class="item-cell singer">{{singerFilter(item.singer)}}</div>
+                        <div class="item-cell duration">{{item.duration}}</div>
+                    </div>
+                </div>
+                <div class="music-list search_list" v-else>
+                    <div class="music-item" v-for="item,index in music_search_list" :key="index">
+                        <div class="item-cell index">{{indexFilter(index)}}</div>
+                        <div class="item-cell title">{{item.title}}</div>
+                        <div class="item-cell singer">{{singerFilter(item.singer)}}</div>
+                        <div class="item-cell download">
+                            <div :class="['download-btn', item.url==''?'download-disabled':'']"
+                                @click="downloadMusic(item)">下载</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="action-bar">
+                <div :class="['note', play_status=='pause'?'note-gif':'note-static']"></div>
+                <div class="song-info">
+                    <div class="title">{{current_music.title}}</div>
+                    <div class="singer">{{current_music.singer}}</div>
+                </div>
+                <div class="button-box">
+                    <div :class="['button','btn-mode',`btn-${play_mode}`]" @click="handePlayMode"></div>
+                    <div class="button btn-pre" @click="preMusic"></div>
+                    <div :class="['button',`btn-${play_status}`]" @click="handePlayStatus"></div>
+                    <div class="button btn-next" @click="nextMusic"></div>
+                    <div :class="['button',`btn-${volume_mode}`]" @click="handeVolumeMode"></div>
+                    <div class="volume-box">
+                        <div class="progress" ref="progress"></div>
+                        <div class="drag-btn" ref="drag_btn" @mousedown="handelMouseDown"></div>
+                        <div class="value">{{volume_value}}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="./js/vue.js"></script>
+    <script type="module" type='text/javascript'>
+        const app = Vue.createApp({
+            setup() {
+                let username = generate_uuid()
+                let ws = new WebSocket('ws://192.168.1.209:8888/' + username + '/');
+                ws.onopen = () => {
+                    ws.send(JSON.stringify({ 'path': 'music/local' }))
+                }
+                ws.onmessage = event => {
+                    let response = JSON.parse(event.data);
+                    let api = response.api
+                    let data = response.data
+                    api_map[api](data)
+                }
+                ws.onclose = () => {
+                    console.log('连接已关闭...');
+                }
+
+                let current_music = Vue.ref({})
+                let rowMusicList = []
+                let music_local_list = Vue.ref()
+                let music_search_list = Vue.ref()
+
+                let api_map = {
+                    'music/playerInfo': receivePlayerInfo,
+                    'music/local': handleLocalMusic,
+                    'music/search': handleSearchMusic,
+                    'music/download': receiveDownLoad,
+                    'music/playMode': receiveplayMode,
+                    'music/play': receviePlayMusic,
+                    'music/pause': recevicePauseMusic,
+                    'music/unpause': receviceUnpauseMusic,
+                    'music/pre': receivePreMusic,
+                    'music/next': receiveNextMusic,
+                    'music/volume': receiveVolume,
+                    'music/msg': receiveMsg
+                }
+                function receivePlayerInfo(data) {
+                    console.log(data);
+                    play_mode.value = data.mode
+                    current_music.value = data.music
+                    play_status.value = data.play_status ? 'pause' : 'play'
+                    volume_value.value = data.volume * 100
+                }
+                function handleLocalMusic(data) {
+                    if (data.player_status) { getPlayerInfo() }
+                    rowMusicList = data.music_list
+                    music_local_list.value = data.music_list
+                }
+                function handleSearchMusic(data) {
+                    music_search_list.value = data.music_list
+                }
+                let download_queue = Vue.ref([])
+                function receiveDownLoad(data) {
+                    download_queue.value = data
+                }
+                function receiveplayMode(data) {
+                    play_mode.value = data.play_mode
+                }
+                function receviePlayMusic(data) {
+                    current_music.value = data
+                    play_status.value = 'pause'
+                }
+                function recevicePauseMusic(data) {
+                    play_status.value = data.play_status
+                }
+                function receviceUnpauseMusic(data) {
+                    play_status.value = data.play_status
+                }
+                function receivePreMusic(data) {
+                    receviePlayMusic(data)
+                }
+                function receiveNextMusic(data) {
+                    receviePlayMusic(data)
+                }
+                function receiveVolume(data) {
+                    console.log(data);
+                }
+                let message = Vue.ref('')
+                function receiveMsg(msg) {
+                    message.value = msg
+                }
+
+                function getPlayerInfo() {
+                    ws.send(JSON.stringify({ 'path': 'music/playerInfo' }))
+                }
+                function playMusic(music) {
+                    ws.send(JSON.stringify({ 'path': 'music/play', 'query': { 'index': music.index } }))
+                }
+                function preMusic(params) {
+                    ws.send(JSON.stringify({ 'path': 'music/pre' }))
+                }
+                function nextMusic(params) {
+                    ws.send(JSON.stringify({ 'path': 'music/next' }))
+                }
+
+                let input_lock = false
+                function filterStart() {
+                    input_lock = true
+                }
+                function filterEnd() {
+                    input_lock = false
+                }
+                let filter_value = Vue.ref('')
+                function handleFilter(event) {
+                    if (input_lock) return
+                    filter_value.value = event.target.value
+                    let value = filter_value.value.replace(/(\s*$)/g, "").toUpperCase()
+                    let filter_music_list = rowMusicList.filter(item => {
+                        let title = item.title.toUpperCase()
+                        let singer = item.singer.toUpperCase()
+                        return (title.indexOf(value) != -1) || (singer.indexOf(value) != -1)
+                    })
+                    music_local_list.value = filter_music_list
+                }
+                let search_value = Vue.ref('')
+                function handleSearch() {
+                    ws.send(JSON.stringify({ 'path': 'music/search', 'query': { 'search_value': search_value.value } }))
+                }
+                function downloadMusic(music) {
+                    ws.send(JSON.stringify({ 'path': 'music/download', 'query': { 'music': music } }))
+                }
+                let play_mode = Vue.ref('loop')
+                function handePlayMode() {
+                    let mode = play_mode.value == 'loop' ? 'random' : 'loop'
+                    ws.send(JSON.stringify({ 'path': 'music/playMode', query: { 'mode': mode } }))
+                }
+                let play_status = Vue.ref('play')
+                function handePlayStatus() {
+                    if (play_status.value == 'play') {
+                        play_status.value = 'pause'
+                        ws.send(JSON.stringify({ 'path': 'music/unpause' }))
+                    } else {
+                        play_status.value = 'play'
+                        ws.send(JSON.stringify({ 'path': 'music/pause' }))
+                    }
+                }
+                let volume_mode = Vue.ref('volume')
+                function handeVolumeMode() {
+                    volume_mode.value = volume_mode.value == 'volume' ? 'mute' : 'volume'
+                }
+                let volume_value = Vue.ref(0)
+
+                function indexFilter(index) {
+                    let i = index + 1
+                    return i < 10 ? `0${i}` : i
+                }
+                function singerFilter(value) {
+                    return value.length >= 18 ? `${value.slice(0, 18)}...` : value
+                }
+
+                let music_source = Vue.ref([{ id: 1, value: '本地' }, { id: 2, value: '搜索' }])
+                let source_selected = Vue.ref({ id: 1, value: '本地' })
+                function handleMusicSource(data) {
+                    source_selected.value = data
+                }
+
+                // document.onkeydown = function (e) {
+                //     if (e.code == 'Space') { handePlayStatus() }
+                // }
+                let progress = Vue.ref()
+                let drag_btn = Vue.ref()
+                function handelMouseDown(e) {
+                    let disx = e.pageX - drag_btn.value.offsetLeft
+                    let progress_width = progress.value.clientWidth - drag_btn.value.clientWidth
+                    document.onmousemove = function (e) {
+                        let offsetx = e.pageX - disx
+                        if (offsetx >= 0 && offsetx <= progress_width) {
+                            drag_btn.value.style.left = offsetx + 'px'
+                            volume_value.value = Math.floor(offsetx / progress_width * 100)
+                        }
+                    }
+                    document.onmouseup = function () {
+                        document.onmousemove = document.onmouseup = null;
+                        ws.send(JSON.stringify({ 'path': 'music/volume', 'query': { 'volume_value': volume_value.value } }))
+                    }
+                }
+
+                return {
+                    message,
+                    music_source,
+                    source_selected,
+                    handleMusicSource,
+                    current_music,
+                    music_local_list,
+                    music_search_list,
+                    filterStart,
+                    filterEnd,
+                    filter_value,
+                    handleFilter,
+                    indexFilter,
+                    singerFilter,
+                    search_value,
+                    handleSearch,
+                    download_queue,
+                    downloadMusic,
+                    playMusic,
+                    preMusic,
+                    nextMusic,
+                    play_mode,
+                    play_status,
+                    volume_mode,
+                    volume_value,
+                    handePlayMode,
+                    handePlayStatus,
+                    handeVolumeMode,
+                    progress,
+                    drag_btn,
+                    handelMouseDown,
+                }
+            }
+        }).mount('#app')
+        function generate_uuid() {
+            let uuid = localStorage.getItem('uuid')
+            if (uuid == null) {
+                let d = new Date().getTime();
+                if (window.performance && typeof window.performance.now == "function") {
+                    d += performance.now(); //use high-precision timer if available
+                }
+                uuid = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+                    /[xy]/g,
+                    function (c) {
+                        let r = (d + Math.random() * 16) % 16 | 0;
+                        d = Math.floor(d / 16);
+                        return (c == "x" ? r : (r & 0x3) | 0x8).toString(16);
+                    }
+                );
+                localStorage.setItem('uuid', uuid)
+            }
+            return uuid
+        }
+    </script>
+</body>
+
+</html>
